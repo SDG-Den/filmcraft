@@ -199,6 +199,10 @@ pub struct FilmcraftApp {
     pub session: Session,
     pub ui: UiState,
     pub tokens: Tokens,
+    /// The suite palette loaded at startup or by the watcher; `None` keeps the built-in theme.
+    pub palette: Option<craft_ui::theme::palette::Palette>,
+    #[cfg(not(target_arch = "wasm32"))]
+    palette_watcher: craft_ui::theme::palette::PaletteWatcher,
     pub frames: Arc<FrameServer>,
     pub playback: Playback,
     pub source_playback: source_playback::SourcePlayback,

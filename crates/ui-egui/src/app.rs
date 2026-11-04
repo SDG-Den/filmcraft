@@ -19,6 +19,17 @@ mod prefs;
 mod textures;
 mod window;
 
+/// The suite palette at startup. Web builds keep the built-in theme.
+#[cfg(not(target_arch = "wasm32"))]
+fn load_palette() -> Option<craft_ui::theme::palette::Palette> {
+    craft_ui::theme::palette::Palette::load().map(|loaded| loaded.palette)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_palette() -> Option<craft_ui::theme::palette::Palette> {
+    None
+}
+
 impl FilmcraftApp {
     /// Build the app around one shared `FrameServer`, falling back to the default language on an unparsable preference, loading workspaces from the prefs
     /// directory and seeding IME epoch/sequence identity.
@@ -35,6 +46,9 @@ impl FilmcraftApp {
             session,
             ui: UiState { language, ..UiState::default() },
             tokens: Tokens::for_kind(ThemeKind::Dark),
+            palette: load_palette(),
+            #[cfg(not(target_arch = "wasm32"))]
+            palette_watcher: craft_ui::theme::palette::PaletteWatcher::from_env(),
             frames,
             playback: Playback { speed: 1.0, ..Default::default() },
             source_playback: Default::default(),
@@ -374,6 +388,7 @@ impl FilmcraftApp {
             // Setup and fresh-input handling happen where `RawInput::events` are available. Pass 1+
             // has no new events and must not re-run a click, shortcut or drop.
             self.auto.begin_frame();
+            self.poll_palette(&ctx);
             self.apply_prefs(&ctx);
             self.sync_timeline_view();
             panels::metadata::follow_selection(self);

@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use craft_ui::theme::palette::Palette;
 use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, Stroke, TextStyle, Visuals};
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +42,15 @@ impl ThemeKind {
             "light" => Some(ThemeKind::Light),
             _ => None,
         }
+    }
+}
+
+/// The theme family to draw: a loaded palette supplies light or dark, otherwise the saved kind.
+pub fn effective_kind(kind: ThemeKind, palette: Option<&Palette>) -> ThemeKind {
+    match palette {
+        Some(palette) if palette.is_dark() => ThemeKind::Dark,
+        Some(_) => ThemeKind::Light,
+        None => kind,
     }
 }
 
@@ -333,6 +343,43 @@ impl Tokens {
         }
     }
 
+    /// The built-in theme `kind` with the shared suite palette's core chrome.
+    pub fn for_palette(kind: ThemeKind, palette: &Palette) -> Self {
+        Self::for_kind(kind).with_palette(palette)
+    }
+
+    /// Override the core chrome from a suite palette. Domain colours, metrics and fonts stay.
+    pub fn with_palette(mut self, palette: &Palette) -> Self {
+        self.kind = effective_kind(self.kind, Some(palette));
+        let accent = palette.accent();
+        let surface = palette.surface();
+        let surface_alt = palette.surface_alt();
+        let outline = palette.outline();
+        self.app_bg = palette.background();
+        self.header_bg = surface;
+        self.panel_bg = surface;
+        self.tab_bg = surface;
+        self.tab_text = palette.text_muted();
+        self.tab_text_active = palette.text();
+        self.focus = accent;
+        self.accent = accent;
+        self.accent_hover = mix(accent, palette.contrast_text(), 0.12);
+        self.text = palette.text();
+        self.text_dim = palette.text_muted();
+        self.text_faint = mix(palette.text_muted(), palette.background(), 0.45);
+        self.icon = palette.text_muted();
+        self.icon_active = palette.text();
+        self.hover = surface_alt;
+        self.pressed = mix(surface_alt, palette.text_muted(), 0.25);
+        self.field_bg = mix(surface, palette.background(), 0.5);
+        self.field_border = outline;
+        self.separator = outline;
+        self.row_alt = mix(surface, surface_alt, 0.25);
+        self.row_selected = mix(surface_alt, accent, 0.25);
+        self.danger = palette.danger();
+        self
+    }
+
     /// Settings ▸ Appearance on top of a theme: the highlight colour (selections, primary buttons,
     /// the focus outline, the playhead, timecodes, drag values and track targeting) and accessible
     /// colour contrast (brighter secondary text and borders).
@@ -514,6 +561,11 @@ pub fn apply_visuals(ctx: &egui::Context, t: &Tokens) {
 /// How long egui's fades and slides take (menus, collapsing sections, tooltips); 0 when
 /// Settings ▸ Appearance ▸ "Animate zoom, scrolling and menus" is off (#2325).
 pub const ANIMATION_TIME: f32 = 0.12;
+
+/// Blend two colours in gamma space; `amount` 0 keeps `from`, 1 keeps `to`.
+fn mix(from: Color32, to: Color32, amount: f32) -> Color32 {
+    from.lerp_to_gamma(to, amount.clamp(0.0, 1.0))
+}
 
 #[cfg(test)]
 mod tests {
@@ -720,5 +772,100 @@ mod tests {
                 assert!(defs.families.values().flatten().all(|name| !name.starts_with("craft:")));
             }
         });
+    }
+
+    fn theme_palette(dark: bool) -> Palette {
+        let background = if dark { "#101010" } else { "#fafafa" };
+        let surface = if dark { "#1a1a1a" } else { "#f0f0f0" };
+        let text = if dark { "#e0e0e0" } else { "#1c1c1c" };
+        Palette::from_canonical_json(&serde_json::json!({
+            "name": "test",
+            "dark": dark,
+            "base00": background,
+            "base01": surface,
+            "base02": if dark { "#202020" } else { "#e6e6e6" },
+            "base03": if dark { "#303030" } else { "#b8b8b8" },
+            "base04": if dark { "#909090" } else { "#707070" },
+            "base05": text,
+            "base08": "#cc3333",
+            "base0D": "#3366ff"
+        }))
+        .unwrap()
+    }
+
+    fn luminance(color: Color32) -> f32 {
+        let linear = |channel: u8| {
+            let value = f32::from(channel) / 255.0;
+            if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
+    }
+
+    #[test]
+    fn dark_palette_maps_the_core_chrome() {
+        let palette = theme_palette(true);
+        let t = Tokens::for_palette(ThemeKind::Dark, &palette);
+        assert_eq!(t.kind, ThemeKind::Dark);
+        assert_eq!(t.app_bg, Color32::from_rgb(0x10, 0x10, 0x10));
+        assert_eq!(t.panel_bg, Color32::from_rgb(0x1a, 0x1a, 0x1a));
+        assert_eq!(t.tab_bg, t.panel_bg);
+        assert_eq!(t.text, Color32::from_rgb(0xe0, 0xe0, 0xe0));
+        assert_eq!(t.tab_text_active, t.text);
+        assert_eq!(t.text_dim, Color32::from_rgb(0x90, 0x90, 0x90));
+        assert_eq!(t.icon, t.text_dim);
+        assert_eq!(t.separator, Color32::from_rgb(0x30, 0x30, 0x30));
+        assert_eq!(t.field_border, t.separator);
+        assert_eq!(t.accent, Color32::from_rgb(0x33, 0x66, 0xff));
+        assert_eq!(t.focus, t.accent);
+        assert_eq!(t.danger, palette.danger());
+    }
+
+    #[test]
+    fn light_palette_maps_the_core_chrome() {
+        let palette = theme_palette(false);
+        let t = Tokens::for_palette(ThemeKind::Light, &palette);
+        assert_eq!(t.kind, ThemeKind::Light);
+        assert_eq!(t.app_bg, Color32::from_rgb(0xfa, 0xfa, 0xfa));
+        assert_eq!(t.panel_bg, Color32::from_rgb(0xf0, 0xf0, 0xf0));
+        assert_eq!(t.text, Color32::from_rgb(0x1c, 0x1c, 0x1c));
+        assert_eq!(t.text_dim, Color32::from_rgb(0x70, 0x70, 0x70));
+        assert_eq!(t.separator, Color32::from_rgb(0xb8, 0xb8, 0xb8));
+        assert_eq!(t.accent, Color32::from_rgb(0x33, 0x66, 0xff));
+        assert!(luminance(t.app_bg) > luminance(t.text));
+    }
+
+    #[test]
+    fn palette_family_overrides_the_saved_kind() {
+        assert_eq!(effective_kind(ThemeKind::Light, Some(&theme_palette(true))), ThemeKind::Dark);
+        assert_eq!(effective_kind(ThemeKind::Dark, Some(&theme_palette(false))), ThemeKind::Light);
+        assert_eq!(Tokens::for_palette(ThemeKind::Light, &theme_palette(true)).kind, ThemeKind::Dark);
+        assert_eq!(Tokens::for_palette(ThemeKind::Dark, &theme_palette(false)).kind, ThemeKind::Light);
+    }
+
+    #[test]
+    fn no_palette_keeps_the_saved_kind_and_built_in_tokens() {
+        for kind in [ThemeKind::Dark, ThemeKind::Medium, ThemeKind::Light] {
+            assert_eq!(effective_kind(kind, None), kind);
+            assert_eq!(Tokens::for_kind(kind).kind, kind);
+        }
+        let base = Tokens::for_kind(ThemeKind::Dark);
+        let mapped = Tokens::for_palette(ThemeKind::Dark, &theme_palette(true));
+        assert_eq!(mapped.tl_bg, base.tl_bg, "timeline colours stay from the built-in theme");
+        assert_eq!(mapped.meter_bg, base.meter_bg, "meter colours stay from the built-in theme");
+        assert_eq!(mapped.plot_bg, base.plot_bg, "plot colours stay from the built-in theme");
+        assert_eq!(mapped.panner_bg, base.panner_bg, "panner colours stay from the built-in theme");
+    }
+
+    #[test]
+    fn palette_accent_keeps_readable_text() {
+        for palette in [Palette::dark(), Palette::light()] {
+            let accent = palette.accent();
+            let text = palette.contrast_text();
+            let (lighter, darker) = {
+                let (a, b) = (luminance(accent), luminance(text));
+                if a > b { (a, b) } else { (b, a) }
+            };
+            assert!((lighter + 0.05) / (darker + 0.05) >= 4.5, "{:?} on {accent:?}", text);
+        }
     }
 }
