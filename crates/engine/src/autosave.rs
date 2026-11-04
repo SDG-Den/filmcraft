@@ -480,7 +480,13 @@ impl Preferences {
     }
 
     pub fn load(path: &Path) -> Self {
-        fs::read(path).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).map(Self::from_value).unwrap_or_default()
+        let mut value = fs::read(path).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).unwrap_or_else(|| Self::default().to_value());
+        if let Some(dir) = path.parent()
+            && let Some(overlay) = craft_settings::overlay::load_overlay(dir)
+        {
+            craft_settings::overlay::merge(&mut value, overlay);
+        }
+        Self::from_value(value)
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {

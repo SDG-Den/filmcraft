@@ -44,6 +44,7 @@ thiserror = { workspace = true }
 log = { workspace = true }
 chrono = { workspace = true }
 craft-docpath = { workspace = true }
+craft-settings = { workspace = true }
 web-time = "1"
 
 [dev-dependencies]
