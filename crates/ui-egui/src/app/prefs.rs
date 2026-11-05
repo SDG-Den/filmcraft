@@ -1,15 +1,38 @@
 use super::{FilmcraftApp, ThemeKind, Tokens, dock, i18n, state, theme};
 
 impl FilmcraftApp {
-    /// Show theme `k` with the Settings ▸ Appearance highlight colour and contrast.
+    /// Show theme `k` with the Settings ▸ Appearance highlight colour and contrast. A loaded suite
+    /// palette supplies the light/dark family and overrides the core chrome.
     pub fn set_theme(&mut self, ctx: &egui::Context, k: ThemeKind) {
         let a = &self.session.prefs.appearance;
         let highlight = filmcraft_engine::settings::parse_hex(&a.highlight_color);
-        self.tokens = Tokens::for_kind(k).with_appearance(highlight, a.accessible_contrast);
+        let kind = theme::effective_kind(k, self.palette.as_ref());
+        let mut tokens = Tokens::for_kind(kind).with_appearance(highlight, a.accessible_contrast);
+        if let Some(palette) = &self.palette {
+            tokens = tokens.with_palette(palette);
+        }
+        self.tokens = tokens;
         theme::apply_visuals(ctx, &self.tokens);
         self.apply_tooltips(ctx);
-        self.ui.dark = k != ThemeKind::Light;
+        self.ui.dark = self.tokens.kind != ThemeKind::Light;
     }
+
+    /// Reload the suite palette while the window is visible. Hidden windows do not poll.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn poll_palette(&mut self, ctx: &egui::Context) {
+        let visible = ctx.input(|input| input.viewport().visible().unwrap_or(true));
+        if !visible {
+            return;
+        }
+        if let Some(loaded) = self.palette_watcher.poll(ctx) {
+            self.palette = Some(loaded.palette);
+            let k = self.appearance_kind(ctx);
+            self.set_theme(ctx, k);
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn poll_palette(&mut self, _ctx: &egui::Context) {}
 
     /// The system appearance: the host's reading, else what the windowing toolkit reports.
     pub fn system_theme(&self, ctx: &egui::Context) -> Option<egui::Theme> {
@@ -65,7 +88,7 @@ impl FilmcraftApp {
         // changes as they happen (no polling) and wakes the UI only when the value changes.
         if self.applied_prefs.is_some() {
             let k = self.appearance_kind(ctx);
-            if k != self.tokens.kind {
+            if theme::effective_kind(k, self.palette.as_ref()) != self.tokens.kind {
                 self.set_theme(ctx, k);
             }
         }
