@@ -1,0 +1,8 @@
+{
+  "url": "https://github.com/SDG-Den/filmcraft/releases/download/binary-testing/filmcraft-0.16.0-linux-x86_64.tar.gz",
+  "hash": "sha256-WdydV18LAQmgabi3kPi2GyeKy5tmw9RJ1bWs50EtQv8=",
+  "version": "0.16.0",
+  "tag": "binary-testing",
+  "system": "x86_64-linux",
+  "repo": "SDG-Den/filmcraft"
+}
