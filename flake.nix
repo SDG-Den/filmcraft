@@ -14,6 +14,12 @@
       url = "github:storytold/craft-fonts/b076417b5880bd4154bd22f00695b1d28c6bea83";
       flake = false;
     };
+
+    # Splits the dependency build from the app build, so a source change does not recompile the
+    # whole dependency graph.
+    crane = {
+      url = "github:ipetkov/crane";
+    };
   };
 
   outputs =
@@ -21,6 +27,7 @@
       self,
       nixpkgs,
       craft-fonts,
+      crane,
     }:
     let
       inherit (nixpkgs) lib;
@@ -46,23 +53,39 @@
         inherit craft-fonts buildDate;
       };
 
+      # Written by `.github/workflows/binary.yml`; absent until the first binary release.
+      binaryInfo =
+        if builtins.pathExists ./binary-url.json then
+          builtins.fromJSON (builtins.readFile ./binary-url.json)
+        else
+          null;
+
       forAllSystems = f: lib.genAttrs systems (system: f (import nixpkgs { inherit system; }) system);
     in
     {
       packages = forAllSystems (
-        pkgs: _:
+        pkgs: system:
         let
-          filmcraft = pkgs.callPackage ./nix/package.nix packageArgs;
+          source = pkgs.callPackage ./nix/package.nix (packageArgs // { craneLib = crane.mkLib pkgs; });
+          binary = pkgs.callPackage ./nix/binary.nix {
+            name = "filmcraft";
+            info = binaryInfo;
+          };
+          binaryAvailable = binaryInfo != null && binaryInfo.system == system;
         in
         {
-          inherit filmcraft;
-          default = filmcraft;
+          filmcraft-source = source;
+          filmcraft = if binaryAvailable then binary else source;
+          default = if binaryAvailable then binary else source;
+        }
+        // lib.optionalAttrs binaryAvailable {
+          filmcraft-binary = binary;
         }
       );
 
       # `nixpkgs.overlays = [ inputs.filmcraft.overlays.default ]` → `pkgs.filmcraft` everywhere.
       overlays.default = final: _prev: {
-        filmcraft = final.callPackage ./nix/package.nix packageArgs;
+        filmcraft = final.callPackage ./nix/package.nix (packageArgs // { craneLib = crane.mkLib final; });
       };
 
       apps = forAllSystems (
@@ -77,7 +100,7 @@
       devShells = forAllSystems (
         pkgs: system:
         let
-          filmcraft = self.packages.${system}.filmcraft;
+          filmcraft = self.packages.${system}.filmcraft-source;
         in
         {
           default = pkgs.mkShell (
@@ -104,12 +127,16 @@
       );
 
       checks = forAllSystems (
-        pkgs: system: {
-          filmcraft = self.packages.${system}.filmcraft;
+        pkgs: system:
+        let
+          filmcraft = self.packages.${system}.filmcraft-source;
+        in
+        {
+          filmcraft = filmcraft;
 
           # Both module entry points evaluate with `enable = true` (no full NixOS evaluation).
           modules = pkgs.callPackage ./nix/module-check.nix {
-            filmcraft = self.packages.${system}.filmcraft;
+            inherit filmcraft;
           };
 
           # `nix fmt` formats the flake; this keeps it formatted.
@@ -126,16 +153,28 @@
       # so `nixosModules.default`/`homeManagerModules.default` work without the overlay.
       nixosModules.default =
         { pkgs, ... }:
+        let
+          system = pkgs.stdenv.hostPlatform.system;
+        in
         {
           imports = [ (import ./nix/module.nix { kind = "nixos"; }) ];
-          _module.args.filmcraftPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.filmcraft;
+          _module.args = {
+            filmcraftSourcePackage = self.packages.${system}.filmcraft-source;
+            filmcraftBinaryPackage = self.packages.${system}.filmcraft-binary or null;
+          };
         };
 
       homeManagerModules.default =
         { pkgs, ... }:
+        let
+          system = pkgs.stdenv.hostPlatform.system;
+        in
         {
           imports = [ (import ./nix/module.nix { kind = "home-manager"; }) ];
-          _module.args.filmcraftPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.filmcraft;
+          _module.args = {
+            filmcraftSourcePackage = self.packages.${system}.filmcraft-source;
+            filmcraftBinaryPackage = self.packages.${system}.filmcraft-binary or null;
+          };
         };
     };
 }
