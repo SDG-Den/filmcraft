@@ -93,6 +93,24 @@ fn interface_language_defaults_to_the_system_language() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// A declarative `settings.override.json` beside `preferences.json` wins over the saved values,
+/// and loading never rewrites either file.
+#[test]
+fn settings_overlay_merges_over_saved_preferences() {
+    let dir = tmp_dir("settings-overlay");
+    let path = dir.join("preferences.json");
+    let overlay = dir.join("settings.override.json");
+    std::fs::write(&path, r#"{"general":{"interfaceLanguage":"es"},"autoSave":{"intervalMinutes":5}}"#).unwrap();
+    std::fs::write(&overlay, r#"{"general":{"interfaceLanguage":"de"},"autoSave":{"intervalMinutes":9}}"#).unwrap();
+
+    let prefs = Preferences::load(&path);
+    assert_eq!(prefs.general.interface_language, "de");
+    assert_eq!(prefs.auto_save.interval_minutes, 9);
+    assert!(std::fs::read_to_string(&overlay).unwrap().contains("\"de\""));
+    assert!(std::fs::read_to_string(&path).unwrap().contains("\"es\""));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 fn write_png(path: &Path, w: u32, h: u32) {
     image::RgbaImage::from_pixel(w, h, image::Rgba([200, 40, 40, 255])).save(path).unwrap();
 }
