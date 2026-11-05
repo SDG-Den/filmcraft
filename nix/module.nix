@@ -18,6 +18,10 @@
   # The package of this flake; `flake.nix` passes it through `_module.args`, so importing the
   # module directly needs no overlay.
   filmcraftPackage ? pkgs.filmcraft,
+  # `flake.nix` passes the source build and the pre-built release binary separately. Importing the
+  # module directly falls back to `filmcraftPackage` and no binary.
+  filmcraftSourcePackage ? filmcraftPackage,
+  filmcraftBinaryPackage ? null,
   ...
 }:
 
@@ -60,10 +64,24 @@ in
   options.programs.filmcraft = {
     enable = mkEnableOption "FilmCraft";
 
+    useBinary = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Install the pre-built Linux binary from `binary-url.json` when this system has one,
+        instead of building from source. Falls back to the source build when the file is missing
+        or the system is unsupported.
+      '';
+    };
+
     package = mkOption {
       type = types.package;
-      default = filmcraftPackage;
-      defaultText = lib.literalMD "the `filmcraft` package of this flake";
+      default =
+        if cfg.useBinary && filmcraftBinaryPackage != null then
+          filmcraftBinaryPackage
+        else
+          filmcraftSourcePackage;
+      defaultText = lib.literalMD "the pre-built binary from `binary-url.json`, or the source build";
       description = "The FilmCraft package to install.";
     };
 
